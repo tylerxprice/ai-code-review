@@ -1,38 +1,33 @@
 import ast
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any
+
+from ai_review.config import ReviewConfig
+from ai_review.analyzers.errors import AnalyzerError
+from ai_review.analyzers.types import PythonSummary, PythonFunctionSummary, PythonClassSummary
+
 
 class PythonAnalyzer:
     """Analyzes Python files using AST to extract structural information."""
 
-    def analyze_content(self, content: str) -> Dict[str, Any]:
+    def analyze_content(self, content: str) -> PythonSummary:
         """Extract classes, functions, and docstrings from Python source."""
         try:
             tree = ast.parse(content)
-        except (SyntaxError, ValueError):
-            return {
-                "classes": [],
-                "functions": [],
-                "docstring": None,
-                "imports": [],
-                "error": "Failed to parse AST"
-            }
+        except (SyntaxError, ValueError) as exc:
+            raise AnalyzerError("Failed to parse AST") from exc
 
-        summary = {
+        summary: PythonSummary = {
             "classes": [],
             "functions": [],
             "docstring": ast.get_docstring(tree),
-            "imports": []
+            "imports": [],
         }
 
-        for node in ast.walk(tree):
+        for node in tree.body:
             if isinstance(node, ast.ClassDef):
-                # We only want top-level classes and functions for the structural summary
-                # but we want all imports for the dependency graph.
-                if node in tree.body:
-                    summary["classes"].append(self._analyze_class(node))
+                summary["classes"].append(self._analyze_class(node))
             elif isinstance(node, ast.FunctionDef):
-                if node in tree.body:
-                    summary["functions"].append(self._analyze_function(node))
+                summary["functions"].append(self._analyze_function(node))
             elif isinstance(node, ast.Import):
                 for name in node.names:
                     summary["imports"].append(name.name)
@@ -43,35 +38,46 @@ class PythonAnalyzer:
 
         return summary
 
-    def _analyze_class(self, node: ast.ClassDef) -> Dict[str, Any]:
-        return {
-            "name": node.name,
-            "docstring": ast.get_docstring(node),
-            "methods": [self._analyze_function(n) for n in node.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
-        }
+    def _analyze_class(self, node: ast.ClassDef) -> PythonClassSummary:
+        return PythonClassSummary(
+            name=node.name,
+            docstring=ast.get_docstring(node),
+            methods=[
+                self._analyze_function(n)
+                for n in node.body
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            ],
+        )
 
-    def _analyze_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> Dict[str, Any]:
+    def _analyze_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> PythonFunctionSummary:
         args = [arg.arg for arg in node.args.args]
-        return {
-            "name": node.name,
-            "args": args,
-            "docstring": ast.get_docstring(node)
-        }
+        return PythonFunctionSummary(
+            name=node.name,
+            args=args,
+            docstring=ast.get_docstring(node),
+        )
 
     def format_summary(self, summary: Dict[str, Any]) -> str:
         """Format the AST summary into a compressed markdown-like string."""
         lines = []
+        imports = summary.get("imports", [])
+        if imports:
+            display_imports = imports[: ReviewConfig.MAX_IMPORTS_IN_SUMMARY]
+            lines.append(f"imports: {', '.join(display_imports)}")
+            if len(imports) > len(display_imports):
+                lines.append(f"imports: ... (+{len(imports) - len(display_imports)} more)")
+
         if summary.get("docstring"):
             lines.append(f"\"\"\"{summary['docstring']}\"\"\"")
-        
+
         for cls in summary["classes"]:
             lines.append(f"class {cls['name']}:")
-            if cls['docstring']:
+            if cls["docstring"]:
                 lines.append(f"    \"\"\"{cls['docstring']}\"\"\"")
             for method in cls["methods"]:
                 lines.append(f"    def {method['name']}({', '.join(method['args'])}): ...")
-        
+
         for func in summary["functions"]:
             lines.append(f"def {func['name']}({', '.join(func['args'])}): ...")
-            
+
         return "\n".join(lines)

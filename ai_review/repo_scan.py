@@ -13,27 +13,44 @@ class RepoScanner:
     def scan(self) -> List[str]:
         """List all files in the repository that are not excluded."""
         repo_files = []
-        for root, dirs, files in os.walk(self.repo_path):
-            # Prune ignored directories
-            dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['node_modules', '__pycache__', 'venv', '.venv', 'dist', 'build']]
-            
-            for file in files:
-                rel_path = os.path.relpath(os.path.join(root, file), self.repo_path)
-                if not ReviewConfig.should_exclude(rel_path):
-                    repo_files.append(rel_path)
-        
-        return repo_files
+        try:
+            tracked = self.git._run(["ls-files"])
+            for line in tracked.splitlines():
+                if not line:
+                    continue
+                if not ReviewConfig.should_exclude(line):
+                    repo_files.append(line)
+            return repo_files
+        except Exception:
+            # Fallback to filesystem walk for non-git repos
+            for root, dirs, files in os.walk(self.repo_path):
+                # Prune ignored directories
+                dirs[:] = [
+                    d for d in dirs
+                    if not d.startswith('.') and d not in ReviewConfig.EXCLUDED_DIR_NAMES
+                ]
+
+                for file in files:
+                    rel_path = os.path.relpath(os.path.join(root, file), self.repo_path)
+                    if not ReviewConfig.should_exclude(rel_path):
+                        repo_files.append(rel_path)
+
+            return repo_files
 
     def get_file_hashes(self, files: List[str]) -> Dict[str, str]:
         """Get git blob hashes for a list of files."""
-        # Using git rev-parse to get hashes is efficient
-        hashes = {}
-        for f in files:
-            try:
-                # This is a bit slow in a loop, ideal would be a batch command
-                h = self.git._run(["rev-parse", f":{f}"])
-                hashes[f] = h
-            except Exception:
-                # If not in git yet (untracked), use a placeholder or skip
-                hashes[f] = "untracked"
+        hashes = {f: "untracked" for f in files}
+        try:
+            output = self.git._run(["ls-files", "-s"])
+        except Exception:
+            return hashes
+
+        for line in output.splitlines():
+            parts = line.split(None, 3)
+            if len(parts) < 4:
+                continue
+            _, file_hash, _, path = parts
+            if path in hashes:
+                hashes[path] = file_hash
+
         return hashes

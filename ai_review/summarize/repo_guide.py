@@ -1,19 +1,19 @@
 import os
 from typing import Dict, Any, List
+
 from ai_review.repo_scan import RepoScanner
 from ai_review.cache.store import CacheStore
-from ai_review.analyzers.python_ast import PythonAnalyzer
-from ai_review.analyzers.js_heuristic import JSHeuristicAnalyzer
+from ai_review.analyzers.registry import AnalyzerRegistry
+from ai_review.analyzers.errors import AnalyzerError
 
 class RepoAnalyzer:
     """Orchestrates the analysis of the entire repository."""
 
-    def __init__(self, repo_path: str):
+    def __init__(self, repo_path: str, cache_enabled: bool = True, cache_dir: str | None = None):
         self.repo_path = repo_path
         self.scanner = RepoScanner(repo_path)
-        self.cache = CacheStore(repo_path)
-        self.py_analyzer = PythonAnalyzer()
-        self.js_analyzer = JSHeuristicAnalyzer()
+        self.cache = CacheStore(repo_path, enabled=cache_enabled, cache_dir=cache_dir)
+        self.registry = AnalyzerRegistry()
 
     def analyze(self, full: bool = False) -> Dict[str, Any]:
         """Perform full or incremental analysis."""
@@ -32,7 +32,7 @@ class RepoAnalyzer:
             
             # Analyze file
             full_path = os.path.join(self.repo_path, file_path)
-            analyzer = self._get_analyzer(file_path)
+            analyzer = self.registry.get(file_path)
             
             if analyzer:
                 try:
@@ -44,7 +44,7 @@ class RepoAnalyzer:
                         "summary": summary,
                         "type": "structural"
                     }
-                except Exception as e:
+                except (AnalyzerError, UnicodeDecodeError, SyntaxError, ValueError) as e:
                     new_cache[file_path] = {"hash": current_hash, "error": str(e)}
             else:
                 new_cache[file_path] = {"hash": current_hash, "type": "generic"}
@@ -52,20 +52,13 @@ class RepoAnalyzer:
         self.cache.save(new_cache)
         return new_cache
 
-    def _get_analyzer(self, file_path: str):
-        if file_path.endswith(".py"):
-            return self.py_analyzer
-        if file_path.endswith((".js", ".jsx", ".ts", ".tsx")):
-            return self.js_analyzer
-        return None
-
     def generate_guide(self, analysis_data: Dict[str, Any]) -> str:
         """Generate a REPO_GUIDE.md string from analysis data."""
         lines = ["# Repository Structural Guide", ""]
         
         for file_path, data in sorted(analysis_data.items()):
             if "summary" in data:
-                analyzer = self._get_analyzer(file_path)
+                analyzer = self.registry.get(file_path)
                 if analyzer:
                     lines.append(f"## File: `{file_path}`")
                     lines.append("```")

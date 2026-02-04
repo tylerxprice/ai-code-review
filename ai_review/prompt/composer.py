@@ -1,5 +1,5 @@
 import os
-from typing import Dict, Any
+from typing import Optional
 
 class PromptComposer:
     """Assembles the final review prompt using templates and context."""
@@ -11,10 +11,18 @@ class PromptComposer:
         with open(os.path.join(self.templates_dir, f"{name}.md"), "r") as f:
             return f.read()
 
-    def compose(self, packet_md: str) -> str:
+    def compose(
+        self,
+        packet_md: str,
+        chunk_info: Optional[str] = None,
+        final_instruction: Optional[str] = None
+    ) -> str:
         """Combine system instructions, rubric, and review packet into a single prompt."""
         system = self._read_template("system")
         rubric = self._read_template("rubric")
+        final_text = final_instruction or (
+            "Return only the professional-quality review in Markdown."
+        )
         
         prompt = [
             "# SYSTEM INSTRUCTIONS",
@@ -22,12 +30,22 @@ class PromptComposer:
             "",
             "# REVIEW RUBRIC",
             rubric,
+        ]
+
+        if chunk_info:
+            prompt.extend([
+                "",
+                "# CHUNK CONTEXT",
+                chunk_info,
+            ])
+
+        prompt.extend([
             "",
             "# REVIEW PACKET",
             packet_md,
             "",
             "# FINAL INSTRUCTION",
-            "Write all findings in a sophisticated, professional-quality markdown, persisted to `CODE_REVIEW.md`."
-        ]
+            final_text,
+        ])
         
         return "\n".join(prompt)

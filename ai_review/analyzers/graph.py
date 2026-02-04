@@ -1,6 +1,8 @@
 from typing import Dict, List, Set, Any
 import os
 
+from ai_review.config import ReviewConfig
+
 class GraphService:
     """Manages the directed graph of module dependencies."""
 
@@ -35,16 +37,61 @@ class GraphService:
 
     def _resolve_imports(self, current_file: str, imports: List[str], all_files: Set[str]) -> List[str]:
         """Maps import symbols/strings back to repository file paths."""
-        resolved = []
+        resolved = set()
+        file_set = set(all_files)
         for imp in imports:
-            # Heuristic resolution: check if any file path contains the import string
-            # e.g., 'auth.service' -> 'auth/service.py'
-            imp_path = imp.replace(".", "/")
-            for f in all_files:
-                if imp_path in f:
-                    resolved.append(f)
-                    break
-        return list(set(resolved))
+            if not imp:
+                continue
+
+            candidates = []
+            # Handle alias-based imports
+            alias_match = False
+            for alias, replacement in ReviewConfig.IMPORT_ALIASES.items():
+                if imp.startswith(alias):
+                    alias_match = True
+                    tail = imp[len(alias):]
+                    if alias == "@nilo/":
+                        parts = tail.split("/", 1)
+                        package = parts[0]
+                        subpath = parts[1] if len(parts) > 1 else "index"
+                        base = os.path.normpath(os.path.join(replacement, package, "src", subpath))
+                    else:
+                        base = os.path.normpath(os.path.join(replacement, tail))
+                    candidates.extend(self._candidate_paths(base))
+            if alias_match:
+                for path in candidates:
+                    if path in file_set:
+                        resolved.add(path)
+                continue
+
+            # Relative paths (JS/TS)
+            if imp.startswith("."):
+                base_dir = os.path.dirname(current_file)
+                base = os.path.normpath(os.path.join(base_dir, imp))
+                candidates.extend(self._candidate_paths(base))
+            else:
+                # Python-style module path
+                imp_path = imp.replace(".", "/")
+                candidates.extend(self._candidate_paths(imp_path))
+
+            for path in candidates:
+                if path in file_set:
+                    resolved.add(path)
+
+        return sorted(resolved)
+
+    def _candidate_paths(self, base: str) -> List[str]:
+        if os.path.splitext(base)[1]:
+            return [base]
+        extensions = [".ts", ".tsx", ".js", ".jsx", ".py"]
+        candidates = []
+        for ext in extensions:
+            candidates.append(f"{base}{ext}")
+        for ext in extensions:
+            candidates.append(os.path.join(base, f"index{ext}"))
+        for ext in [".py"]:
+            candidates.append(os.path.join(base, f"__init__{ext}"))
+        return candidates
 
     def _bfs_reachable(self, start_node: str, max_depth: int) -> List[str]:
         """Find nodes reachable in reverse graph (downstream consumers) up to max_depth."""

@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List
 
 class PromptChunker:
     """Splits large review packets into manageable chunks for LLMs."""
@@ -15,19 +15,36 @@ class PromptChunker:
         chunks = []
         current_chunk = []
         current_len = 0
+        in_fence = False
+        fence_marker = None
 
         # Split by lines to keep markdown structure mostly intact
         for line in packet_md.splitlines():
+            if line.startswith("```"):
+                if in_fence:
+                    in_fence = False
+                    fence_marker = None
+                else:
+                    in_fence = True
+                    fence_marker = line
+
             if current_len + len(line) + 1 > self.max_chars:
                 if current_chunk:
+                    if in_fence:
+                        current_chunk.append("```")
                     chunks.append("\n".join(current_chunk))
                     current_chunk = []
                     current_len = 0
+                    if in_fence and fence_marker:
+                        current_chunk.append(fence_marker)
+                        current_len += len(fence_marker) + 1
             
             current_chunk.append(line)
             current_len += len(line) + 1
 
         if current_chunk:
+            if in_fence:
+                current_chunk.append("```")
             chunks.append("\n".join(current_chunk))
 
         # Add index information to chunks

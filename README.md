@@ -67,8 +67,23 @@ ai_review prompt --mode working
 # Support for large PRs via chunking
 ai_review prompt . --mode working --chunked
 
+# Include untracked files in the review
+ai_review prompt --mode working --include-untracked
+
+# Output to a file
+ai_review prompt --mode working --output review_prompt.md
+
 # Compare branches
 ai_review prompt --base main --head feature-branch
+
+# Pipe to Gemini CLI
+ai_review prompt --mode working | gemini -p
+
+# Annotate diff lines with line numbers (default on)
+ai_review prompt --base main --head feature-branch --line-numbers
+
+# Read-only mode (no cache/guide files written)
+ai_review prompt --base main --head feature-branch --read-only
 ```
 
 ### Analyze Repository Structure
@@ -91,14 +106,40 @@ Get a clean markdown summary of the diff.
 
 ```bash
 ai_review changes --mode working
+ai_review changes --mode working --max-diff-lines 2000
+ai_review changes --base main --head feature-branch --line-numbers
 ```
 
 ### Build a Context Packet
 Generate the raw structural context without the prompt instructions.
 
 ```bash
-ai_review packet .
+ai_review packet . --include-untracked
+ai_review packet . --max-diff-lines 2000
+ai_review packet . --read-only
 ```
+
+---
+
+## ✅ Testing
+
+```bash
+pip install -e .[dev]
+# or: pip install -r requirements-dev.txt
+pytest
+```
+
+---
+
+## 🧩 Optional JS/TS Parsing (Tree-sitter)
+
+For higher-fidelity JS/TS parsing, install tree-sitter bindings:
+
+```bash
+pip install tree_sitter tree_sitter_languages
+```
+
+If unavailable, the tool falls back to regex-based heuristics.
 
 ---
 

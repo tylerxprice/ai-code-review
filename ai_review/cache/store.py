@@ -5,16 +5,20 @@ from typing import Dict, Any, Optional
 class CacheStore:
     """Manages persistent caching for repository analysis results."""
 
-    def __init__(self, repo_path: str):
-        self.cache_dir = os.path.join(repo_path, ".ai_review", "cache")
+    def __init__(self, repo_path: str, enabled: bool = True, cache_dir: str | None = None):
+        self.enabled = enabled
+        self.cache_dir = cache_dir or os.path.join(repo_path, ".ai_review", "cache")
         self.cache_file = os.path.join(self.cache_dir, "analysis.json")
-        self._ensure_dir()
+        if self.enabled:
+            self._ensure_dir()
 
     def _ensure_dir(self):
         os.makedirs(self.cache_dir, exist_ok=True)
 
     def load(self) -> Dict[str, Any]:
         """Load cache from disk."""
+        if not self.enabled:
+            return {}
         if not os.path.exists(self.cache_file):
             return {}
         try:
@@ -25,6 +29,8 @@ class CacheStore:
 
     def save(self, data: Dict[str, Any]):
         """Save cache to disk."""
+        if not self.enabled:
+            return
         with open(self.cache_file, "w") as f:
             json.dump(data, f, indent=2)
 
